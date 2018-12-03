@@ -1,4 +1,4 @@
-#mpirun -n 3 python3 n-bodies.py 12 1000
+#mpirun -n 4 python3 n-bodies.py 12 1000
 from mpi4py import MPI
 import sys
 import math
@@ -9,9 +9,6 @@ from scipy import misc
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import time
-
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
 
 # split a vector "x" in "size" part, each of them having "n" elements
 def split(x, n, size):
@@ -100,32 +97,49 @@ def init_world(n):
 	data.append( Data_item(id=nbbodies-1, positionx=0, positiony=0, speedx=0, speedy=0, weight=1e6*solarmass))
 	return data
 
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+num_threads = comm.Get_size()
+
 nbbodies = int(sys.argv[1])
 NBSTEPS = int(sys.argv[2])
-num_threads = comm.getSize()
-nbbodies_local = nbbodies/num_threads
-force = []
+
+bodies = []
+splitted_bodies = []
 
 if rank == 0:
 	plt.draw()
 	plt.show(block=False)
 	bodies = init_world(nbbodies)
-else:
-	bodies = none
-	
-comm.barrier()
-local_bodies = comm.bcast(bodies, root=0)
+	splitted_bodies = split(bodies, int(nbbodies/num_threads), num_threads)
+
+#Only need to call the init_world on one thread, the bcast to the others.
+bodies = comm.bcast(bodies, root=0)
+#Modifications will be made on the local_bodies, while they'll be reading on global bodies.
+local_bodies = comm.scatter(splitted_bodies, root=0)
+nbbodies_local = len(local_bodies)
+
+force = [[0,0] for i in range(nbbodies_local)]
 
 # here to start the code...
 for t in range(NBSTEPS):
-	force = [(0,0)]*nbbodies_local
 	for i in range(nbbodies_local):
-		for j in range(nbbodies_local):
-			(fi, fj) = interaction(local_bodies[i], local_bodies[j])
-			force[i] = (force[i][0]+fi, force[i][1]+fj)
+		force[i] = [0,0]
+		for j in range(nbbodies):
+			f = interaction(bodies[i+nbbodies_local*rank], bodies[j])
+			force[i][0]=force[i][0]+f[0]
+			force[i][1]=force[i][1]+f[1]
 	
+	#bodies update
 	comm.barrier()
 	for i in range(nbbodies_local):
-		bodies[i] = update(local_bodies[i], force[i])
+		local_bodies[i] = update(local_bodies[i], force[i])
+
+	comm.barrier()
+	splitted_bodies = comm.allgather(local_bodies)
+	comm.barrier()
+	bodies = unsplit(splitted_bodies)
+
+	comm.barrier()
 	if rank == 0:
-		displayPlot(local_bodies)
+		displayPlot(bodies)
