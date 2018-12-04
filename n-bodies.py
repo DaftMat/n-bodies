@@ -131,15 +131,9 @@ for t in range(NBSTEPS):
 			force[i][1]=force[i][1]+f[1]
 	
 	#bodies update
-	comm.barrier()
 	for i in range(nbbodies_local):
 		local_bodies[i] = update(local_bodies[i], force[i])
-
-	comm.barrier()
 	splitted_bodies = comm.allgather(local_bodies)
-	comm.barrier()
 	bodies = unsplit(splitted_bodies)
-
-	comm.barrier()
 	if rank == 0:
 		displayPlot(bodies)
